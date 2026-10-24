@@ -7,7 +7,6 @@ const bridge = createBridge(config, { staticDir: resolve(import.meta.dir, '../di
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 8787),
   hostname: process.env.HOST ?? '127.0.0.1',
-  idleTimeout: 30, // incoming-call webhooks are held open while the fridge rings
   fetch: bridge.fetch,
 });
-console.log(`familyhub-call bridge listening on ${server.url} (texting: ${Boolean(config.imessage)}, calls: ${Boolean(config.facetime && config.livekit)}, inside: ${Boolean(config.smartthings)})`);
+console.log(`familyhub-call bridge listening on ${server.url} (texting: ${Boolean(config.imessage)}, calls: ${Boolean(config.facetime)}, inside: ${Boolean(config.smartthings)})`);

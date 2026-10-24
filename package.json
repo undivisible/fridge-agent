@@ -12,9 +12,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@trychert/sdk": "0.2.0",
-    "livekit-client": "2.23.0",
-    "livekit-server-sdk": "2.19.2"
+    "@trychert/sdk": "0.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

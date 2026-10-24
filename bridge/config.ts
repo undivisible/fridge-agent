@@ -6,19 +6,18 @@ export interface BridgeConfig {
   deviceToken: string;
   /** Origins allowed to call the API from a browser context (packaged Tizen apps use `file://` → `null`). */
   allowedOrigins: string[];
-  /** Family allowlist: the only handles that may text commands to, or FaceTime, the fridge line. */
+  /** Family allowlist: the only handles that may text commands to the fridge line. */
   contacts: Contact[];
   /** How the fridge screen names the line people text, e.g. "+61 400 000 000". */
   lineLabel?: string;
-  /** Ring window for FaceTime calls arriving at the line; Chert's webhook budget is ~13s. */
-  ringTimeoutMs: number;
-  /** Ring window for calls requested by an iMessage "call" command. */
-  textRingTimeoutMs: number;
   /** Chert iMessage line that receives commands and replies (with photos). */
   imessage?: { apiKey: string; webhookSecret: string; baseURL?: string };
-  /** Chert FaceTime control plane for the same line. */
-  facetime?: { token: string; projectId: string; lineId: string; webhookSecret?: string; baseUrl?: string };
-  livekit?: { url: string; apiKey: string; apiSecret: string };
+  /**
+   * Chert FaceTime control plane. Calls are Chert-managed: `assistantId` is the Chert assistant that
+   * hosts the call, because Chert needs either an assistant or a LiveKit room on the far end and the
+   * fridge contributes no audio/video.
+   */
+  facetime?: { token: string; projectId: string; lineId: string; assistantId: string; video: boolean; baseUrl?: string };
   smartthings?: {
     deviceId: string;
     /** Client id the undocumented `udo/file_links` endpoint expects; must be set explicitly (see docs/FEASIBILITY.md). */
@@ -52,8 +51,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     allowedOrigins: (env.FRIDGE_ALLOWED_ORIGINS ?? 'null').split(',').map((s) => s.trim()).filter(Boolean),
     contacts: parseContacts(env.FRIDGE_CONTACTS),
     lineLabel: env.FRIDGE_LINE_LABEL || undefined,
-    ringTimeoutMs: Number(env.FRIDGE_RING_TIMEOUT_MS ?? 10_000),
-    textRingTimeoutMs: Number(env.FRIDGE_TEXT_RING_TIMEOUT_MS ?? 45_000),
   };
   if (env.CHERT_API_KEY) {
     config.imessage = { apiKey: env.CHERT_API_KEY, webhookSecret: required(env, 'CHERT_IMESSAGE_WEBHOOK_SECRET'), baseURL: env.CHERT_IMESSAGE_BASE_URL || undefined };
@@ -63,12 +60,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       token: env.CHERT_FACETIME_TOKEN,
       projectId: required(env, 'CHERT_PROJECT_ID'),
       lineId: required(env, 'CHERT_LINE_ID'),
-      webhookSecret: env.CHERT_FACETIME_WEBHOOK_SECRET || undefined,
+      assistantId: required(env, 'CHERT_ASSISTANT_ID'),
+      video: env.CHERT_CALL_VIDEO !== 'false',
       baseUrl: env.CHERT_FACETIME_BASE_URL || undefined,
     };
-  }
-  if (env.LIVEKIT_URL) {
-    config.livekit = { url: env.LIVEKIT_URL, apiKey: required(env, 'LIVEKIT_API_KEY'), apiSecret: required(env, 'LIVEKIT_API_SECRET') };
   }
   if (env.SMARTTHINGS_DEVICE_ID) {
     const oauth = env.SMARTTHINGS_REFRESH_TOKEN

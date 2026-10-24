@@ -4,23 +4,19 @@ import { createBridge } from '../bridge/bridge';
 import type { BridgeConfig } from '../bridge/config';
 
 const DEVICE = 'd'.repeat(40);
-const FT_SECRET = 'ft-whsec';
 const IM_SECRET = 'im-whsec';
 const CHERT = 'https://console.trychert.com/api/v1';
 const base: BridgeConfig = {
   deviceToken: DEVICE,
   allowedOrigins: ['null'],
   contacts: [{ label: 'Mum', handle: '+61 400 000 001' }],
-  ringTimeoutMs: 300,
-  textRingTimeoutMs: 300,
   imessage: { apiKey: 'line-api-key', webhookSecret: IM_SECRET },
-  facetime: { token: 'ft-token', projectId: '00000000-0000-4000-8000-000000000001', lineId: 'line-1', webhookSecret: FT_SECRET },
-  livekit: { url: 'wss://lk.example.test', apiKey: 'APIkey', apiSecret: 's'.repeat(40) },
+  facetime: { token: 'ft-token', projectId: '00000000-0000-4000-8000-000000000001', lineId: 'line-1', assistantId: 'asst-1', video: true },
   smartthings: { deviceId: 'fridge-1', viewInsideCid: 'cid-x', token: 'st-token' },
 };
 
 interface Seen { url: string; method: string; headers: Headers; body?: any }
-function fakeUpstream(opts: { uploadOrigin?: string } = {}) {
+function fakeUpstream(opts: { uploadOrigin?: string; callStatus?: string } = {}) {
   const seen: Seen[] = [];
   let attachments = 0;
   const fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -29,6 +25,12 @@ function fakeUpstream(opts: { uploadOrigin?: string } = {}) {
     seen.push({ url, method: init.method ?? 'GET', headers: new Headers(init.headers), body });
     if (url === 'https://facetime.trychert.com/api/v1/calls') {
       return Response.json({ data: { id: 'call-1', status: 'queued', media_status: {}, facetime_call_events: [] } });
+    }
+    if (url === 'https://facetime.trychert.com/api/v1/calls/call-1') {
+      return Response.json({ data: { id: 'call-1', status: opts.callStatus ?? 'active', media_status: {}, facetime_call_events: [] } });
+    }
+    if (url === 'https://facetime.trychert.com/api/v1/calls/call-1/end') {
+      return Response.json({ data: { id: 'call-1', status: 'ended', media_status: {}, facetime_call_events: [] } });
     }
     if (url === `${CHERT}/attachments`) {
       const id = `att-${++attachments}`;
@@ -52,7 +54,6 @@ function fakeUpstream(opts: { uploadOrigin?: string } = {}) {
 
 const api = (path: string, init: RequestInit = {}, token = DEVICE) =>
   new Request(`http://bridge.test${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...init.headers } });
-const claims = (jwt: string) => JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString());
 
 function text(eventId: string, from: string, value: string, opts: { group?: boolean; secret?: string } = {}) {
   const raw = JSON.stringify({
@@ -65,22 +66,11 @@ function text(eventId: string, from: string, value: string, opts: { group?: bool
   return new Request('http://bridge.test/webhooks/chert/imessage', { method: 'POST', body: raw, headers: { 'x-chert-signature': `v1,${ts},${sig}` } });
 }
 
-function facetimeEvent(id: string, from: string | null, secret = FT_SECRET) {
-  const raw = JSON.stringify({
-    event_id: `evt-${id}`, type: 'call.incoming', created_at: 'now',
-    data: { call_id: id, line_id: 'line-1', media: { audio: true, video: true }, from_handle_hash: null, occurred_at: 'now',
-      from: from ? { type: 'phone_number', value: from } : null },
-  });
-  return new Request('http://bridge.test/webhooks/chert/facetime', {
-    method: 'POST', body: raw, headers: { 'X-Chert-Signature': `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}` },
-  });
-}
-
 async function settle(bridge: ReturnType<typeof createBridge>) { await Promise.all([...bridge.tasks]); }
 const sends = (seen: Seen[]) => seen.filter((s) => s.url.startsWith(`${CHERT}/chats/`));
 
 test('fridge API rejects a same-length wrong device token', async () => {
-  const response = await createBridge(base).fetch(api('/api/ring', {}, 'e'.repeat(40)));
+  const response = await createBridge(base).fetch(api('/api/status', {}, 'e'.repeat(40)));
   expect(response.status).toBe(401);
 });
 
@@ -128,63 +118,56 @@ describe('iMessage control', () => {
     await settle(bridge);
     expect(up.seen.some((s) => s.url.startsWith('https://attacker.example'))).toBe(false);
     expect(sends(up.seen)).toHaveLength(0);
-  });
 
-  test('"call" rings the fridge and only FaceTimes the sender after someone answers there', async () => {
-    const up = fakeUpstream();
-    const bridge = createBridge({ ...base, textRingTimeoutMs: 5_000 }, { fetch: up.fetch });
-    await bridge.fetch(text('e5', '+61400000001', 'call'));
-    await Bun.sleep(20);
-    const ringing = await (await bridge.fetch(api('/api/ring'))).json();
-    expect(ringing).toMatchObject({ label: 'Mum', video: true });
-    expect(up.seen.some((s) => s.url.endsWith('/calls'))).toBe(false);
-
-    const joined = await (await bridge.fetch(api(`/api/ring/${ringing.id}/answer`, { method: 'POST' }))).json();
+    // A failed photo upload still lets "call" go through, with a text-only note.
+    await bridge.fetch(text('e4b', '+61400000001', 'call'));
     await settle(bridge);
-    const call = up.seen.find((s) => s.url === 'https://facetime.trychert.com/api/v1/calls')!;
-    expect(call.body).toMatchObject({ mode: 'customer_managed', line_id: 'line-1', destination: '+61400000001' });
-    // Chert must bridge the fridge participant, with its own credential, in the same room.
-    expect(call.body.remote_participant_identity).toBe(claims(joined.token).sub);
-    expect(claims(call.body.participant_token).sub).toBe(joined.remoteIdentity);
-    expect(claims(call.body.participant_token).video.room).toBe(claims(joined.token).video.room);
-    expect(sends(up.seen).map((s) => s.body.message.parts[0].value)).toEqual([expect.stringContaining('Ringing the fridge')]);
+    expect(sends(up.seen).map((s) => s.body.message.parts)).toEqual([[{ type: 'text', value: expect.stringContaining('not available') }]]);
+    expect(up.seen.some((s) => s.url === 'https://facetime.trychert.com/api/v1/calls')).toBe(true);
   });
 
-  test('"call" tells the sender when nobody answers at the fridge', async () => {
+  test('"call" puts the photos in the chat before a managed FaceTime call to the sender', async () => {
+    const up = fakeUpstream();
+    const bridge = createBridge(base, { fetch: up.fetch });
+    await bridge.fetch(text('e5', '+61 400 000 001', 'call'));
+    await settle(bridge);
+
+    const photosAt = up.seen.findIndex((s) => s.url === `${CHERT}/chats/chat-1/messages`);
+    const callAt = up.seen.findIndex((s) => s.url === 'https://facetime.trychert.com/api/v1/calls');
+    expect(photosAt).toBeGreaterThanOrEqual(0);
+    expect(callAt).toBeGreaterThan(photosAt);
+    expect(up.seen[photosAt]!.body.message.parts.filter((p: any) => p.type === 'media')).toHaveLength(2);
+    const call = up.seen[callAt]!;
+    // No media room: Chert's assistant hosts the call and the fridge contributes no audio/video.
+    expect(call.body).toEqual({ direction: 'outbound', mode: 'managed', assistant_id: 'asst-1', line_id: 'line-1',
+      destination: '+61 400 000 001', media: { audio: true, video: true } });
+    expect(call.headers.get('Idempotency-Key')).toBe('fridge-call-e5');
+
+    expect(await (await bridge.fetch(api('/api/status'))).json()).toEqual({ call: { label: 'Mum', status: 'active' } });
+  });
+
+  test('a second "call" during an active call is refused; "end" hangs up', async () => {
     const up = fakeUpstream();
     const bridge = createBridge(base, { fetch: up.fetch });
     await bridge.fetch(text('e6', '+61400000001', 'call'));
     await settle(bridge);
-    expect(sends(up.seen).at(-1)!.body.message.parts[0].value).toBe('Nobody answered at the fridge.');
-    expect(up.seen.some((s) => s.url.endsWith('/calls'))).toBe(false);
-  });
-});
+    await bridge.fetch(text('e7', '+61400000001', 'call'));
+    await settle(bridge);
+    expect(up.seen.filter((s) => s.url.endsWith('/api/v1/calls'))).toHaveLength(1);
+    expect(sends(up.seen).at(-1)!.body.message.parts[0].value).toBe('The fridge line is already on a call.');
 
-describe('FaceTime to the line', () => {
-  test('rejects a body signed with another secret', async () => {
-    expect((await createBridge(base).fetch(facetimeEvent('c1', '+61400000001', 'other'))).status).toBe(401);
-  });
-
-  test('declines callers that are not family contacts', async () => {
-    expect(await (await createBridge(base).fetch(facetimeEvent('c2', '+61499999999'))).json()).toEqual({ action: 'decline' });
+    await bridge.fetch(text('e8', '+61400000001', 'end'));
+    await settle(bridge);
+    expect(up.seen.some((s) => s.url.endsWith('/calls/call-1/end') && s.method === 'POST')).toBe(true);
+    expect(await (await bridge.fetch(api('/api/status'))).json()).toEqual({ call: null });
   });
 
-  test('rings the fridge and accepts with a room bridging the fridge participant once answered', async () => {
-    const bridge = createBridge(base);
-    const decision = bridge.fetch(facetimeEvent('c3', '+61400000001'));
-    await Bun.sleep(20);
-    expect(await (await bridge.fetch(api('/api/ring'))).json()).toEqual({ id: 'c3', label: 'Mum', video: true });
-    const joined = await (await bridge.fetch(api('/api/ring/c3/answer', { method: 'POST' }))).json();
-    const accepted = await (await decision).json();
-    expect(accepted.action).toBe('accept');
-    expect(accepted.remote_participant_identity).toBe(claims(joined.token).sub);
-    expect(claims(accepted.participant_token).sub).toBe(joined.remoteIdentity);
-    // Replaying the same event cannot open a second room.
-    expect(await (await bridge.fetch(facetimeEvent('c3', '+61400000001'))).json()).toEqual({ action: 'decline' });
-  });
-
-  test('declines when nobody answers before the ring timeout', async () => {
-    expect(await (await createBridge(base).fetch(facetimeEvent('c4', '+61400000001'))).json()).toEqual({ action: 'decline' });
+  test('the fridge forgets a call once Chert reports it ended', async () => {
+    const up = fakeUpstream({ callStatus: 'ended' });
+    const bridge = createBridge(base, { fetch: up.fetch });
+    await bridge.fetch(text('e9', '+61400000001', 'call'));
+    await settle(bridge);
+    expect(await (await bridge.fetch(api('/api/status'))).json()).toEqual({ call: null });
   });
 });
 

@@ -17,7 +17,7 @@ const WORDS: Record<string, Command> = {
   end: 'end', hangup: 'end', stop: 'end',
 };
 
-export const HELP = 'Fridge commands: "inside" for the latest photos, "retake" for fresh photos, "call" to FaceTime the fridge, "end" to hang up.';
+export const HELP = 'Fridge commands: "inside" for the latest photos, "retake" for fresh photos, "call" for a FaceTime call with the photos in this chat, "end" to hang up.';
 
 export function parseCommand(text: string): Command {
   const first = text.trim().toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/)[0] ?? '';
