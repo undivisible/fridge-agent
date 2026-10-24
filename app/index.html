@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fridge Call</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <section id="pair" class="screen" hidden>
+      <h1>Pair this fridge</h1>
+      <p class="muted">Enter the bridge address and device token from your bridge host. They are stored only on this fridge.</p>
+      <form id="pair-form">
+        <label>Bridge URL <input name="origin" type="url" required placeholder="https://fridge-bridge.example.com"></label>
+        <label>Device token <input name="token" type="password" required minlength="32" autocomplete="off"></label>
+        <button type="submit" class="primary">Pair</button>
+      </form>
+      <p id="pair-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="home" class="screen" hidden>
+      <header class="bar">
+        <h1>Fridge line</h1>
+        <button id="unpair" class="ghost" type="button">Unpair</button>
+      </header>
+      <section class="hint" aria-label="How to use">
+        <p id="line-hint">Family members text the fridge's iMessage line.</p>
+        <ul>
+          <li><b>inside</b> sends the latest photos</li>
+          <li><b>retake</b> takes fresh photos</li>
+          <li><b>call</b> rings this screen, then FaceTimes them</li>
+          <li><b>end</b> hangs up</li>
+        </ul>
+        <p id="status-note" class="muted" role="status"></p>
+      </section>
+
+      <section class="inside" aria-labelledby="inside-title">
+        <header class="bar">
+          <h2 id="inside-title">Inside the fridge</h2>
+          <button id="inside-refresh" class="ghost" type="button">Retake photos</button>
+        </header>
+        <p id="inside-meta" class="muted"></p>
+        <div id="inside-images" class="inside-images"></div>
+      </section>
+
+      <footer>
+        <ul id="caps" class="caps" aria-label="Device capabilities"></ul>
+      </footer>
+    </section>
+
+    <section id="incoming" class="screen center" hidden>
+      <p class="muted" id="incoming-kind">FaceTime</p>
+      <h1 id="incoming-name"></h1>
+      <div class="actions">
+        <button id="decline" class="danger" type="button">Decline</button>
+        <button id="answer" class="primary" type="button">Answer</button>
+      </div>
+    </section>
+
+    <section id="call" class="screen call" hidden>
+      <video id="remote-video" autoplay playsinline></video>
+      <audio id="remote-audio" autoplay></audio>
+      <div class="call-top">
+        <h1 id="call-name"></h1>
+        <p id="call-status" class="muted">Connecting…</p>
+      </div>
+      <div class="self">
+        <video id="local-video" autoplay playsinline muted hidden></video>
+        <canvas id="inside-canvas" width="640" height="480" hidden></canvas>
+        <p id="self-note" class="muted"></p>
+      </div>
+      <div class="call-controls">
+        <span id="privacy" class="privacy" aria-live="polite"></span>
+        <button id="mute" class="ghost" type="button">Mute</button>
+        <button id="share-inside" class="ghost" type="button">Show inside</button>
+        <button id="hangup" class="danger" type="button">End</button>
+      </div>
+    </section>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>
