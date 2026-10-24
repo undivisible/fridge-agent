@@ -1,22 +1,18 @@
 /**
  * Demo without hardware or accounts: runs the real bridge against fake Chert (iMessage + FaceTime)
- * and SmartThings upstreams and serves dist/app. LiveKit is real if one is reachable at LIVEKIT_URL
- * (default `livekit-server --dev` on ws://127.0.0.1:7880); otherwise answered calls stop at
- * "Could not connect".
+ * and SmartThings upstreams and serves dist/app.
  *
  *   bun run demo  →  http://127.0.0.1:8787  (device token printed below)
  *   POST /demo/text   body = message text; simulates Mum texting the line ("inside", "call", …)
- *   POST /demo/ring   simulates Mum FaceTiming the line
+ *   POST /demo/status body = call status the fake Chert reports (dialing, active, ended)
  *   GET  /demo/replies  what the line sent back (text + attachment ids)
- *   GET  /demo/remote   the participant credential Chert's worker would receive, so a test page
- *                       can stand in for the FaceTime side
+ *   GET  /demo/calls    FaceTime calls the line was asked to place
  */
 import { createHmac } from 'node:crypto';
 import { resolve } from 'node:path';
 import { createBridge } from '../bridge/bridge';
 
 const deviceToken = 'demo-device-token-0123456789abcdef';
-const ftSecret = 'demo-facetime-secret';
 const imSecret = 'demo-imessage-secret';
 const mum = '+61400000001';
 const photo = (hue: number, label: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480">
@@ -26,14 +22,13 @@ const photo = (hue: number, label: string) => `<svg xmlns="http://www.w3.org/200
 <rect x="460" y="230" width="110" height="90" rx="6" fill="#6aa84f"/><text x="40" y="455" font-family="Arial" font-size="22" fill="#555">${label} (demo image)</text></svg>`;
 
 let callStatus = 'dialing';
-let remote: { token: string; url: string } | undefined;
+const calls: unknown[] = [];
 const replies: unknown[] = [];
 let attachments = 0;
 const fake = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const url = String(input);
   if (url.endsWith('facetime.trychert.com/api/v1/calls')) {
-    const body = JSON.parse(String(init.body));
-    remote = { token: body.participant_token, url: body.livekit_url };
+    calls.push(JSON.parse(String(init.body)));
     return Response.json({ data: { id: 'demo-call', status: 'queued', media_status: {}, facetime_call_events: [] } });
   }
   if (url.endsWith('/calls/demo-call')) return Response.json({ data: { id: 'demo-call', status: callStatus, media_status: {}, terminal_reason: null } });
@@ -61,11 +56,10 @@ const fake = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
 }) as typeof fetch;
 
 const bridge = createBridge({
-  deviceToken, allowedOrigins: [], ringTimeoutMs: 12_000, textRingTimeoutMs: 45_000, lineLabel: '+61 400 555 010',
+  deviceToken, allowedOrigins: [], lineLabel: '+61 400 555 010',
   contacts: [{ label: 'Mum', handle: mum }, { label: 'Dad', handle: '+61400000002' }],
   imessage: { apiKey: 'demo', webhookSecret: imSecret },
-  facetime: { token: 'demo', projectId: '00000000-0000-4000-8000-000000000001', lineId: 'demo-line', webhookSecret: ftSecret },
-  livekit: { url: process.env.LIVEKIT_URL ?? 'ws://127.0.0.1:7880', apiKey: process.env.LIVEKIT_API_KEY ?? 'devkey', apiSecret: process.env.LIVEKIT_API_SECRET ?? 'secret' },
+  facetime: { token: 'demo', projectId: '00000000-0000-4000-8000-000000000001', lineId: 'demo-line', assistantId: 'demo-assistant', video: true },
   smartthings: { deviceId: 'demo-fridge', viewInsideCid: 'demo', token: 'demo' },
 }, { fetch: fake, staticDir: resolve(import.meta.dir, '../dist/app') });
 
@@ -81,18 +75,8 @@ const server = Bun.serve({
       const sig = createHmac('sha256', imSecret).update(`${ts}.${raw}`).digest('hex');
       return bridge.fetch(new Request(new URL('/webhooks/chert/imessage', url), { method: 'POST', body: raw, headers: { 'x-chert-signature': `v1,${ts},${sig}` } }));
     }
-    if (request.method === 'POST' && url.pathname === '/demo/ring') {
-      const raw = JSON.stringify({ event_id: crypto.randomUUID(), type: 'call.incoming', created_at: new Date().toISOString(),
-        data: { call_id: `in-${Date.now()}`, line_id: 'demo-line', media: { audio: true, video: true }, from_handle_hash: null,
-          occurred_at: new Date().toISOString(), from: { type: 'phone_number', value: mum } } });
-      void bridge.fetch(new Request(new URL('/webhooks/chert/facetime', url), { method: 'POST', body: raw,
-        headers: { 'X-Chert-Signature': `sha256=${createHmac('sha256', ftSecret).update(raw).digest('hex')}` } }))
-        .then((r) => r.json())
-        .then((d) => { if (d.action === 'accept') remote = { token: d.participant_token, url: d.livekit_url }; });
-      return Response.json({ ringing: true });
-    }
     if (url.pathname === '/demo/replies') return Response.json(replies);
-    if (url.pathname === '/demo/remote') return Response.json(remote ?? null);
+    if (url.pathname === '/demo/calls') return Response.json(calls);
     if (request.method === 'POST' && url.pathname === '/demo/status') { callStatus = await request.text(); return Response.json({ callStatus }); }
     return bridge.fetch(request);
   },

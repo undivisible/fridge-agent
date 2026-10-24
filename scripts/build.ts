@@ -2,7 +2,7 @@
  * Builds dist/app (served by the bridge, or loaded in the Family Hub browser) and an UNSIGNED
  * dist/familyhub-call.wgt. Sign the .wgt with Tizen Studio before installing (docs/DEPLOYMENT.md).
  *
- *   BRIDGE_ORIGIN=https://fridge-bridge.example.com LIVEKIT_URL=wss://x.livekit.cloud bun run build
+ *   BRIDGE_ORIGIN=https://fridge-bridge.example.com bun run build
  */
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -10,7 +10,6 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dir, '..');
 const out = resolve(root, 'dist/app');
 const bridgeOrigin = (process.env.BRIDGE_ORIGIN ?? '').replace(/\/+$/, '');
-const livekit = process.env.LIVEKIT_URL ? new URL(process.env.LIVEKIT_URL) : undefined;
 
 await rm(resolve(root, 'dist'), { recursive: true, force: true });
 await mkdir(out, { recursive: true });
@@ -31,7 +30,7 @@ if (!result.success) {
 
 for (const file of ['index.html', 'style.css', 'icon.png']) await cp(resolve(root, 'app', file), resolve(out, file));
 
-const connect = [bridgeOrigin, livekit && `wss://${livekit.host}`, livekit && `https://${livekit.host}`].filter(Boolean).join(' ') || 'https: wss:';
+const connect = bridgeOrigin || 'https:';
 const manifest = (await Bun.file(resolve(root, 'app/config.xml')).text())
   .replace('{{ACCESS_ORIGIN}}', bridgeOrigin || '*')
   .replace('{{CSP_CONNECT}}', connect);

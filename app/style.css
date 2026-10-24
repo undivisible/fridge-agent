@@ -45,20 +45,5 @@ input { font: inherit; padding: 16px; border: 2px solid var(--line); border-radi
 @media (orientation: portrait) { .inside-images { grid-template-columns: 1fr; } }
 .inside-images img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: var(--line); }
 
-.caps { list-style: none; display: flex; flex-wrap: wrap; gap: 10px; padding: 0; margin: 0; font-size: .75rem; }
-.caps li { border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; color: var(--muted); }
-.caps li.yes { color: var(--accent); border-color: #b7d3c5; }
-
-.actions { display: flex; gap: 32px; }
-.actions button { min-width: 220px; }
-
-.call { position: relative; padding: 0; background: #111; color: #fff; }
-.call video#remote-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #111; }
-.call-top { position: relative; padding: 48px; background: linear-gradient(#000a, #0000); }
-.call-top .muted { color: #d6d3cc; }
-.self { position: absolute; right: 32px; bottom: 160px; width: 280px; display: flex; flex-direction: column; gap: 8px; }
-.self video, .self canvas { width: 100%; border-radius: 12px; background: #222; }
-.self .muted { color: #d6d3cc; font-size: .8rem; }
-.call-controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 32px 48px; display: flex; gap: 16px; align-items: center; justify-content: flex-end; background: linear-gradient(#0000, #000c); }
-.call-controls .ghost { color: #fff; border-color: #fff6; }
-.privacy { margin-right: auto; font-size: 1rem; color: #ffd8a8; }
+.banner { margin: 0; padding: 20px 28px; border-radius: 16px; background: #1f6f50; color: #fff; font-weight: 600; }
+.banner[hidden] { display: none; }

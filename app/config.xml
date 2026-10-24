@@ -4,13 +4,12 @@
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
         id="https://undivisible.dev/familyhub-call" version="0.1.0" viewmodes="maximized">
   <tizen:application id="FhCall0001.FridgeCall" package="FhCall0001" required_version="6.0"/>
-  <name>Fridge Call</name>
-  <description>FaceTime-bridged family calls and View Inside photos for Samsung Family Hub.</description>
+  <name>Fridge Line</name>
+  <description>View Inside photos and call status for a Family Hub controlled by an iMessage line.</description>
   <content src="index.html"/>
   <icon src="icon.png"/>
   <access origin="{{ACCESS_ORIGIN}}" subdomains="false"/>
-  <tizen:content-security-policy>default-src 'self'; connect-src 'self' {{CSP_CONNECT}}; img-src 'self' blob:; media-src 'self' blob: mediastream:; style-src 'self'; script-src 'self'</tizen:content-security-policy>
+  <tizen:content-security-policy>default-src 'self'; connect-src 'self' {{CSP_CONNECT}}; img-src 'self' blob:; style-src 'self'; script-src 'self'</tizen:content-security-policy>
   <tizen:privilege name="http://tizen.org/privilege/internet"/>
-  <tizen:privilege name="http://tizen.org/privilege/mediacapture"/>
-  <tizen:setting screen-orientation="auto-rotation" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="enable"/>
+  <tizen:setting screen-orientation="auto-rotation" context-menu="disable" background-support="disable" encryption="disable" install-location="auto" hwkey-event="disable"/>
 </widget>
