@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "license": "MIT",
+  "license": "MPL-2.0",
   "scripts": {
     "build": "bun scripts/build.ts",
     "bridge": "bun bridge/main.ts",
