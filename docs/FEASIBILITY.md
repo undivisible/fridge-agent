@@ -47,59 +47,62 @@ file ids the device currently advertises.
   | Tizen 9.0 (2025) | Chromium M120 | Partial | No |
   | Tizen 8.0 (2024) and older | ≤ M108 | No | No |
 
-  Family Hub is not in this table, and its engine version is not published publicly. The app reports
-  what is available at runtime (capability chips on the home screen) instead of assuming.
+  Family Hub is not in this table, and its engine version is not published publicly. The current
+  design does not depend on this table: the fridge screen needs only `fetch` and `<img>`, with no
+  WebRTC or `getUserMedia`.
 - **Cameras.** The View Inside cameras sit inside the fridge, and no public Tizen API exposes them
-  to third-party apps. Whether a given Family Hub has a **user-facing** camera that web apps can
-  reach through `getUserMedia` is **unverified**. Without one, the fridge receives video but sends
-  only audio (if a microphone is reachable) and the inside-photo still.
-- **Privileges.** A Tizen web app needs `http://tizen.org/privilege/internet` and, for capture,
-  `http://tizen.org/privilege/mediacapture`. Partner-level privileges and the Family Hub profile id
-  come from the partner SDK and are not reproduced here.
+  to third-party apps. The fridge's own microphone and any user-facing camera are deliberately
+  unused.
+- **Privileges.** The app needs only `http://tizen.org/privilege/internet`. Partner-level privileges
+  and the Family Hub profile id come from the partner SDK and are not reproduced here.
 
 ## 3. Chert SDK (`trychert/sdk`)
 
 `github.com/trychert/sdk` returns 404. The SDK is the npm package `@trychert/sdk` (MIT), with source
 at <https://github.com/cherthq/sdk>. This project pins `@trychert/sdk@0.2.0`.
 
-- **FaceTime control plane** (`@trychert/sdk/facetime`): `createCall`, `getCall`, `endCall` and the
-  incoming-call webhook types. The SDK **is not a media runtime**.
-  - `customer_managed` calls take a LiveKit URL, a call-scoped `participant_token` for Chert's
-    worker, and `remote_participant_identity`, which is the participant Chert bridges to FaceTime.
-  - Incoming calls are decided by returning `{action:'accept', …room}` or `{action:'decline'}` from
-    the webhook. The webhook is signed `X-Chert-Signature: sha256=<HMAC(raw body)>`, as in
-    `chert-facetime` `webhook-core.ts`.
+- **FaceTime control plane** (`@trychert/sdk/facetime`): `createCall`, `getCall` and `endCall`.
+  The SDK **is not a media runtime**. `CreateCall` has exactly two modes:
+  - `managed` requires `assistant_id` and requested media. A Chert assistant is the far end, and its
+    video is `disabled`, `test_pattern` or an `anam` avatar. The assistant's `background` field is
+    an undocumented string of up to 300 characters.
+  - `customer_managed` requires a LiveKit room (`livekit_url`, `participant_token`,
+    `remote_participant_identity`).
+
+  With LiveKit removed, this project uses `managed` calls. Accepting an inbound FaceTime through the
+  customer webhook also requires a LiveKit room. Direct FaceTime calls to the line therefore follow
+  the line's own Chert inbound policy and are not handled by the bridge.
 - **iMessage** (`@trychert/sdk/imessage`):
   - `verifyWebhook` checks `x-chert-signature: v1,<ts>,<HMAC(ts.body)>` with a 300s window.
   - `message.received` events carry `data.chat.id` and `data.message.sender_handle` plus text
     `parts`.
   - Replies go to `POST /chats/{id}/messages`. Photos go through `POST /attachments`, then a `PUT`
     of the bytes to `upload_url`, then a `media` part.
-- **Not provided:** a FaceTime endpoint that runs on non-Apple hardware. FaceTime is proprietary,
-  so the fridge can only be a LiveKit participant bridged by Chert's Mac worker.
+- **Not provided:**
+  - a FaceTime endpoint that runs on non-Apple hardware;
+  - a way to put an arbitrary image into a FaceTime video without a media room.
 
 ## Answers
 
 | Question | Answer |
 | --- | --- |
-| Video calls that feel like FaceTime from the fridge? | **Yes, bridged.** iPhone users get a real FaceTime call from the Chert line. The fridge is a WebRTC participant. This needs WebRTC in the fridge's engine (likely Tizen 9 or later, unverified). |
-| Show the internal camera view? | **Stills only.** View Inside photos on the fridge screen, as iMessage attachments, and as a still in the call. No live interior video exists. |
-| Control from iMessage? | **Yes.** All actions start from the Chert line, and the fridge cannot dial. |
+| A FaceTime call from the fridge line? | **Yes, Chert-managed.** The line FaceTimes the family member and a Chert assistant hosts the call. The fridge contributes no audio or video. |
+| Show the internal camera view alongside it? | **Yes, as stills in the same iMessage chat.** The photos arrive just before the call and again on `retake` during it. They do not appear inside the FaceTime video, and no live interior video exists. |
+| Control from iMessage? | **Yes.** Every action starts from a text to the line. The fridge only displays. |
 
-## What was verified (no real device)
+## What was verified (no real device, no live accounts)
 
-- **Bridge contract tests (`bun run test`):**
-  - Signatures for both webhooks.
-  - Strangers and group chats are silently ignored.
-  - Photos upload and attach, and a redelivered event does not send a second reply.
-  - The API key is never sent to a foreign upload origin.
-  - `call` places FaceTime only after the fridge answers, with the fridge identity as
-    `remote_participant_identity`.
-  - The FaceTime accept, decline and timeout paths.
+- **Bridge contract tests (`bun run test`, 9 pass):**
+  - The webhook signature is checked, and strangers and group chats are silently ignored.
+  - Photos are uploaded and attached once per event, and the API key never goes to a foreign
+    upload origin.
+  - `call` sends the photos before a `managed` `createCall` to the sender. A failed photo upload
+    still lets the call go ahead.
+  - A second `call` is refused while one is active, `end` hangs up, and calls that Chert reports as
+    ended are cleared.
   - View Inside fetches only file ids the device advertises.
-- **Browser run against `livekit-server --dev`, with a page standing in for Chert's worker:**
-  - The fridge page answered a texted `call`.
-  - The stand-in received the fridge's audio and video.
-  - **Show inside** replaced the outgoing video with the interior still (sampled pixel 238,235,227,
-    matching the demo photo) and then restored the camera (sampled pixel 51,255,0, the fake camera).
-  - Hang-up released the local tracks.
+- **Browser run of the fridge page against the demo bridge:**
+  - A texted `call` produced one chat reply, then one managed FaceTime request.
+  - The fridge showed "FaceTime with Mum: connected · these photos were sent to their iMessage",
+    and cleared it after `end`.
+  - The page never called `getUserMedia`.

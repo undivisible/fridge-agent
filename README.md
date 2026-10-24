@@ -1,54 +1,55 @@
 # familyhub-call
 
-A proof of concept for a Samsung Family Hub fridge that a Chert iMessage line controls. Family members
-text the line to get photos of the fridge's interior, or to start a FaceTime video call that rings
-the fridge screen. The fridge cannot dial out. It shows the interior photos and answers or declines
-calls.
+Proof of concept: a Samsung Family Hub fridge controlled entirely by a Chert iMessage line. Family
+members text the line for interior photos or a FaceTime call. When they ask for a call, the photos
+arrive in their iMessage chat first and the FaceTime call follows. The fridge plays no part in the
+call's audio or video. It only shows the photos and the call status.
 
-**Verdict.** A call that feels like FaceTime is feasible only as a bridged call. Chert's Mac worker
-handles the real FaceTime leg, and the fridge joins as a WebRTC (LiveKit) participant. The fridge's
-internal cameras are **not a live video feed**. They are stills taken after the door closes, read
-through undocumented SmartThings APIs. Both features have been verified against fakes and a local
-LiveKit server. Nothing has been verified on a real fridge, and three blockers remain (see below).
-Details and sources: [docs/FEASIBILITY.md](docs/FEASIBILITY.md).
+**Verdict:** this design is feasible with public Chert APIs.
+
+- **The FaceTime call is Chert-managed.** Chert needs either a media room or a Chert assistant on the
+  far end. With no media room, the call is hosted by a Chert assistant (`CHERT_ASSISTANT_ID`).
+- **The interior image arrives as iMessage photos next to the call, not inside the FaceTime video.**
+  The public SDK cannot inject an arbitrary image into the video without a media room.
+- **The internal cameras are not live.** They produce stills captured after the door closes, read
+  through undocumented SmartThings APIs.
+
+Nothing has been verified on a real fridge or live Chert account. Research and sources:
+[docs/FEASIBILITY.md](docs/FEASIBILITY.md).
 
 ```diagram
- family iPhone                    Chert line (Mac worker)            bridge (this repo)           Family Hub
-┌──────────────┐  iMessage   ┌────────────────────────┐ webhook ┌──────────────────────┐ poll ┌─────────────┐
-│ "inside"     │────────────▶│ message.received        │────────▶│ allowlist + commands │◀─────│ fridge app  │
-│ "call"       │◀────────────│ replies + photo media   │◀────────│ Chert SDK            │─────▶│ ring/answer │
-│              │  FaceTime   │ FaceTime leg            │         │ LiveKit token mint   │      │ photos      │
-│              │◀───────────▶│ joins LiveKit room ◀────┼── WebRTC (LiveKit) ────────────┼─────▶│ WebRTC      │
-└──────────────┘             └────────────────────────┘         │ SmartThings proxy    │      └─────────────┘
-                                                                 └──────────┬───────────┘
-                                                                            │ undocumented viewInside API
-                                                                     SmartThings cloud
+ family iPhone                Chert line                     bridge (this repo)              Family Hub
+┌──────────────┐ iMessage ┌──────────────────┐ webhook  ┌───────────────────────┐  poll  ┌──────────────┐
+│ "call"       │─────────▶│ message.received │─────────▶│ allowlist + commands  │◀───────│ display-only │
+│ photos  ◀────┼──────────│ chat replies     │◀─────────│ photo attachments     │───────▶│ photos       │
+│ FaceTime ◀───┼──────────│ managed FaceTime │◀─────────│ createCall (managed)  │        │ call status  │
+└──────────────┘          └──────────────────┘          └───────────┬───────────┘        └──────────────┘
+                                                                    │ undocumented viewInside API
+                                                             SmartThings cloud
 ```
 
 ## What the line does
 
 | Text from an allowlisted 1:1 chat | Result |
 | --- | --- |
-| `inside` (also `fridge`, `photo`, `pics`) | Replies with the latest View Inside photos attached as iMessage media |
-| `retake` | Asks the fridge to recapture, waits up to 30s for new photos, then replies with them |
-| `call` (also `facetime`, `video`) | Rings the fridge for 45s. The line FaceTimes the sender **only after someone at the fridge answers** |
-| `end` | Ends the active fridge call |
+| `inside` (also `fridge`, `photo`, `pics`) | Replies with the latest View Inside photos as iMessage attachments |
+| `retake` | Asks the fridge to recapture, waits up to 30s, then replies with the new photos. Works during a call too |
+| `call` (also `facetime`, `video`) | Sends the photos into the chat, then the line places a managed FaceTime call to the sender |
+| `end` | Ends the line's active call |
 | anything else | Replies with the command list |
 
-FaceTiming the line directly from an allowlisted handle also rings the fridge. While it rings, the
-Chert incoming-call webhook is held open for about 10s. Unknown senders and group chats get **no
-reply at all**. During a call, **Show inside** swaps the fridge's outgoing camera for a still of the
-interior, so the caller sees inside the fridge.
+Unknown senders and group chats get no reply at all. One call runs at a time.
 
 ## Layout
 
-- `bridge/`: Bun server. `imessage.ts` parses commands and sends replies with photo attachments.
-  `bridge.ts` handles webhooks, rings, LiveKit tokens and the fridge API. `smartthings.ts` handles
-  View Inside.
-- `app/`: the fridge UI, as a Tizen web app (`config.xml`) that the bridge can also host for the
-  Family Hub browser.
+- `bridge/`: Bun server.
+  - `imessage.ts`: parses commands and sends replies with photo attachments.
+  - `bridge.ts`: webhook, command handling, call state and the fridge API.
+  - `smartthings.ts`: View Inside.
+- `app/`: the display-only fridge screen. It packages as a Tizen web app (`config.xml`), or the bridge
+  can host it for the Family Hub browser.
 - `scripts/build.ts`: builds `dist/app` and an **unsigned** `dist/familyhub-call.wgt`.
-  `scripts/demo.ts`: runs the real bridge against fake Chert and SmartThings services.
+- `scripts/demo.ts`: runs the real bridge against fake Chert and SmartThings.
 - `tests/`: bridge contract tests.
 
 ## Run it
@@ -56,29 +57,30 @@ interior, so the caller sees inside the fridge.
 ```sh
 bun install
 bun run typecheck && bun run test
-livekit-server --dev --bind 127.0.0.1 &   # optional: real media locally
-bun run demo                              # http://127.0.0.1:8787, token printed
-curl -X POST localhost:8787/demo/text -d inside   # simulate Mum texting the line
-curl -X POST localhost:8787/demo/text -d call     # fridge rings; answer on screen
+bun run demo                                      # http://127.0.0.1:8787, token printed
+curl -X POST localhost:8787/demo/text -d call     # simulate Mum texting the line
+curl localhost:8787/demo/replies; curl localhost:8787/demo/calls
 ```
 
-Production setup, device prerequisites and installation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-Privacy and security model: [docs/SECURITY.md](docs/SECURITY.md).
+Production setup and fridge installation: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Privacy and
+security model: [docs/SECURITY.md](docs/SECURITY.md).
 
-## Blockers
+## Constraints and blockers
 
-1. **Installing on the fridge.** Family Hub app development is a login-gated Samsung partner
-   program. No public developer mode or sideloading process is documented for Family Hub, only for
-   TVs. Fallback: open the bridge-hosted page in the Family Hub web browser.
-2. **WebRTC and camera access on the fridge are unconfirmed.** In Samsung's published TV engines,
-   WebRTC is only partial on Tizen 9 and full on Tizen 10, and `getUserMedia` exists only on Tizen 10.
-   Samsung does not publish the Family Hub engine version or say whether it has a user-facing camera.
-   The app detects what is available and falls back to receive-only.
-3. **The interior photos rely on private SmartThings APIs.** `samsungce.viewInside` and
-   `client.smartthings.com/udo/file_links` are undocumented, need a Samsung app client id, and can
-   change at any time. SmartThings personal access tokens expire after 24h, so the bridge supports
-   OAuth refresh. That refresh flow has not been verified live.
-
-Chert setup still needed: an iMessage line with a `message.received` webhook subscription, and a
-FaceTime-enabled line with `customer_decides` inbound policy plus a signed incoming-call webhook.
-No live Chert, SmartThings or fridge request has been made from this repository.
+1. **A Chert assistant hosts the call.** A managed FaceTime call requires `assistant_id`, so the
+   caller talks to a Chert assistant, not to the fridge or a person at it.
+   - Without a media room, the image cannot go inside the FaceTime video. The assistant's video
+     settings are `disabled`, `test_pattern` or an avatar.
+   - The assistant's `background` field is undocumented and is not used here.
+2. **Installing on the fridge.** Family Hub app development is a login-gated Samsung partner
+   program, and sideloading is documented only for TVs. Fallback: open the bridge-hosted page in the
+   Family Hub browser. The page needs only `fetch`, not WebRTC or a camera.
+3. **The photos rely on private SmartThings APIs.**
+   - `samsungce.viewInside` and `udo/file_links` are undocumented and need a Samsung app client id.
+   - Personal access tokens expire after 24h. The bridge supports OAuth refresh, which has not been
+     tested live.
+4. **Chert setup is required:**
+   - an iMessage line with a `message.received` webhook subscription;
+   - a FaceTime-enabled line with a published assistant.
+   - iMessage and FaceTime credentials are separate. If the two lines use different handles, the
+     FaceTime call comes from the FaceTime line's handle.
