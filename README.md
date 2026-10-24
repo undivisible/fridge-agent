@@ -1,4 +1,4 @@
-# familyhub-call
+# fridge-agent
 
 Proof of concept: a Samsung Family Hub fridge controlled entirely by a Chert iMessage line. Family
 members text the line for interior photos or a FaceTime call. When they ask for a call, the photos
